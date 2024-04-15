@@ -49,7 +49,7 @@ class UnetDown(nn.Module):
         '''
         layers = [
             ResidualConvBlock(in_channels, out_channels), 
-            # AttnBlock here
+            # attn applied here (for now only in UnetUp)
             nn.MaxPool2d(2),
         ]
         self.model = nn.Sequential(*layers)
@@ -68,13 +68,14 @@ class UnetUp(nn.Module):
             nn.ConvTranspose2d(in_channels, out_channels, 2, 2),
             ResidualConvBlock(out_channels, out_channels),
             ResidualConvBlock(out_channels, out_channels),
-            # AttnBlock here
         ]
+        self.cross_attn = nn.MultiheadAttention() # TODO fill correct parameters
         self.model = nn.Sequential(*layers)
 
-    def forward(self, x, skip):
+    def forward(self, x, skip, text_embs):
         x = torch.cat((x, skip), 1)
         x = self.model(x)
+        x = self.cross_attn(query=x, key=text_embs, value=text_embs)
         return x
 
 
@@ -132,10 +133,16 @@ class ContextUnet(nn.Module):
             nn.ReLU(),
             nn.Conv2d(n_feat, self.in_channels, 3, 1, 1),
         )
+    
+    def avg_pool(self, text_embs):
+        # TODO
+        return
 
-    def forward(self, x, c, t, context_mask):
+    def forward(self, x, c, t, context_mask, text_embs):
         # x is (noisy) image, c is context label, t is timestep, 
         # context_mask says which samples to block the context on
+        
+        pool_text_emb = self.avg_pool(text_embs)
 
         x = self.init_conv(x)
         down1 = self.down1(x)
@@ -161,8 +168,9 @@ class ContextUnet(nn.Module):
         # hiddenvec = torch.cat((hiddenvec, temb1, cemb1), 1)
 
         up1 = self.up0(hiddenvec)
-        # up2 = self.up1(up1, down2) # if want to avoid add and multiply embeddings
-        up2 = self.up1(cemb1*up1+ temb1, down2)  # add and multiply embeddings
-        up3 = self.up2(cemb2*up2+ temb2, down1)
+
+        # TODO: how to apply context_mask to text_embs ?
+        up2 = self.up1(up1 + temb1 + pool_text_emb, down2, text_embs)
+        up3 = self.up2(up2 + temb2 + pool_text_emb, down1, text_embs)
         out = self.out(torch.cat((up3, x), 1))
         return out
