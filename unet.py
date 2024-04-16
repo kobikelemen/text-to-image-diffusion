@@ -69,7 +69,7 @@ class UnetUp(nn.Module):
             ResidualConvBlock(out_channels, out_channels),
             ResidualConvBlock(out_channels, out_channels),
         ]
-        self.cross_attn = nn.MultiheadAttention() # TODO fill correct parameters
+        self.cross_attn = nn.MultiheadAttention(embed_dim=out_channels, num_heads=8) # TODO are these params correct?
         self.model = nn.Sequential(*layers)
 
     def forward(self, x, skip, text_embs):
@@ -135,10 +135,9 @@ class ContextUnet(nn.Module):
         )
     
     def avg_pool(self, text_embs):
-        # TODO
-        return
+        return torch.mean(text_embs, dim=0)
 
-    def forward(self, x, c, t, context_mask, text_embs):
+    def forward(self, x, c, t, context_mask, context_mask_text, text_embs):
         # x is (noisy) image, c is context label, t is timestep, 
         # context_mask says which samples to block the context on
         
@@ -157,6 +156,10 @@ class ContextUnet(nn.Module):
         context_mask = context_mask.repeat(1,self.n_classes)
         context_mask = (-1*(1-context_mask)) # need to flip 0 <-> 1
         c = c * context_mask
+
+        # mask out text_embs if context_mask_text == 1
+        context_mask_text = (-1*(1-context_mask_text)) # need to flip 0 <-> 1
+        text_embs = text_embs * context_mask_text
         
         # embed context, time step
         cemb1 = self.contextembed1(c).view(-1, self.n_feat * 2, 1, 1)
@@ -169,7 +172,6 @@ class ContextUnet(nn.Module):
 
         up1 = self.up0(hiddenvec)
 
-        # TODO: how to apply context_mask to text_embs ?
         up2 = self.up1(up1 + temb1 + pool_text_emb, down2, text_embs)
         up3 = self.up2(up2 + temb2 + pool_text_emb, down1, text_embs)
         out = self.out(torch.cat((up3, x), 1))
