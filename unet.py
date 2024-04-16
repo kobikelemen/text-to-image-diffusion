@@ -69,14 +69,17 @@ class UnetUp(nn.Module):
             ResidualConvBlock(out_channels, out_channels),
             ResidualConvBlock(out_channels, out_channels),
         ]
-        self.cross_attn = nn.MultiheadAttention(embed_dim=out_channels, num_heads=8) # TODO are these params correct?
+        self.cross_attn = nn.MultiheadAttention(embed_dim=out_channels, num_heads=8, batch_first=True) # TODO are these params correct?
         self.model = nn.Sequential(*layers)
 
     def forward(self, x, skip, text_embs):
         x = torch.cat((x, skip), 1)
         x = self.model(x)
-        x = self.cross_attn(query=x, key=text_embs, value=text_embs)
-        return x
+        x_shape = x.shape
+        x_reshape = x.view(x.shape[0], x.shape[1], x.shape[2]*x.shape[3])
+        x_reshape = x_reshape.permute(0,2,1)
+        x = self.cross_attn(query=x_reshape, key=text_embs, value=text_embs)
+        return x[0].permute(0,2,1).view(x_shape)
 
 
 class EmbedFC(nn.Module):
@@ -135,7 +138,7 @@ class ContextUnet(nn.Module):
         )
     
     def avg_pool(self, text_embs):
-        return torch.mean(text_embs, dim=0)
+        return torch.mean(text_embs, dim=1)
 
     def forward(self, x, c, t, context_mask, context_mask_text, text_embs):
         # x is (noisy) image, c is context label, t is timestep, 
@@ -171,8 +174,9 @@ class ContextUnet(nn.Module):
         # hiddenvec = torch.cat((hiddenvec, temb1, cemb1), 1)
 
         up1 = self.up0(hiddenvec)
-
-        up2 = self.up1(up1 + temb1 + pool_text_emb, down2, text_embs)
-        up3 = self.up2(up2 + temb2 + pool_text_emb, down1, text_embs)
+        up2 = self.up1(up1 + temb1, down2, text_embs)
+        # up2 = self.up1(up1 + temb1 + pool_text_emb, down2, text_embs)
+        up3 = self.up2(up2 + temb2, down1, text_embs)
+        # up3 = self.up2(up2 + temb2 + pool_text_emb, down1, text_embs)
         out = self.out(torch.cat((up3, x), 1))
         return out

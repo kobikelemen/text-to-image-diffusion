@@ -106,7 +106,30 @@ def train_mnist():
             torch.save(ddpm.state_dict(), save_dir + f"model_{ep}.pth")
             print('saved model at ' + save_dir + f"model_{ep}.pth")
 
+def test():
+    # hardcoding these here
+    n_epoch = 20
+    batch_size = 16
+    n_T = 400 # 500
+    device = "cuda:0"
+    n_classes = 10
+    n_feat = 128 # 128 ok, 256 better (but slower)
+    # n_feat = 1024
+    lrate = 1e-4
+    save_model = False
+    save_dir = './results/diffusion_outputs10/'
+    ws_test = [0.0, 0.5, 2.0] # strength of generative guidance
+
+    ddpm = DDPM(nn_model=ContextUnet(in_channels=1, n_feat=n_feat, n_classes=n_classes), betas=(1e-4, 0.02), n_T=n_T, device=device, drop_prob=0.5)
+    ddpm.to(device)
+
+    text_embs = torch.rand((batch_size, 8, n_feat)).to(device)
+    c = torch.randint(0,9,(batch_size,)).to(device)
+    x = torch.rand((batch_size,1,28,28)).to(device)
+    loss = ddpm(x, c, text_embs)
+
 
 
 if __name__ == "__main__":
-    train_mnist()
+    # train_mnist()
+    test()
