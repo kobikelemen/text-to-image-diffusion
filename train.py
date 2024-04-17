@@ -1,6 +1,7 @@
 
 from unet import ContextUnet
 from ddpm import DDPM
+from data import Collator, Dataset
 
 from tqdm import tqdm
 import torch
@@ -10,6 +11,9 @@ from torchvision.datasets import MNIST
 from torchvision.utils import save_image, make_grid
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
+
+from torch.utils.data import random_split, DataLoader
+from datasets import load_dataset, concatenate_datasets
 
 
 def train_mnist():
@@ -128,8 +132,75 @@ def test():
     x = torch.rand((batch_size,1,28,28)).to(device)
     loss = ddpm(x, c, text_embs)
 
+def test_dataloader():
+    image_label = None
+    url_label = "link"
+    text_label = "caption"
+    text_encoder_name = "google/t5-v1_1-large"
+    size = 64
+    # dataset_name = "laion/laion2B-en"
+    dataset_name = "laion/gpt4v-dataset"
+    dataset_info = {"batch_size": 1, "shuffle": True}
+    channels = "RGB"
+    ds = load_dataset(dataset_name)
+    
+    train_ds = None
+    
+    # if we have train and valid split we combine them into one dataset to let trainer handle the split
+    if 'train' in ds and 'valid' in ds:
+        train_ds = concatenate_datasets([ds['train'], ds['valid']])
+    elif 'train' in ds:
+        train_ds = ds['train']
+    elif 'valid' in ds:
+        train_ds = ds['valid']
+    else:
+        train_ds = ds
+
+    dl = make_train_dataset(
+        ds = train_ds,
+        collate_fn = Collator(
+            image_size = size,
+            image_label = image_label,
+            text_label = text_label,
+            url_label = url_label,
+            name = text_encoder_name,
+            channels = channels
+        ),
+        **dataset_info
+    )
+    for i, data in enumerate(dl):
+        print(data)
+        if i > 10:
+            return
+
+
+def make_train_dataset(ds = None, *, batch_size, **dl_kwargs):
+        # if not exists(ds):
+        #     return
+
+        # assert not exists(self.train_dl), 'training dataloader was already added'
+
+        # valid_ds = None
+        # if self.split_valid_from_train:
+        #     train_size = int((1 - self.split_valid_fraction) * len(ds))
+        #     valid_size = len(ds) - train_size
+
+        #     ds, valid_ds = random_split(ds, [train_size, valid_size], generator = torch.Generator().manual_seed(self.split_random_seed))
+        #     self.print(f'training with dataset of {len(ds)} samples and validating with randomly splitted {len(valid_ds)} samples')
+
+        dl = DataLoader(ds, batch_size = batch_size, **dl_kwargs)
+        # self.add_train_dataloader(dl)
+
+        # if not self.split_valid_from_train:
+        #     return
+
+        # self.add_valid_dataset(valid_ds, batch_size = batch_size, **dl_kwargs)
+        return dl
+
+
 
 
 if __name__ == "__main__":
     # train_mnist()
-    test()
+    test_dataloader()
+ 
