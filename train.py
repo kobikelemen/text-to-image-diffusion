@@ -133,14 +133,30 @@ def test():
     loss = ddpm(x, c, text_embs)
 
 def test_dataloader():
+    # hardcoding these here
+    n_epoch = 20
+    batch_size = 4
+    n_T = 400 # 500
+    device = "cuda:0"
+    n_classes = 10
+    n_feat = 128 # 128 ok, 256 better (but slower)
+    # n_feat = 1024
+    lrate = 1e-4
+    save_model = False
+    save_dir = './results/diffusion_outputs10/'
+    ws_test = [0.0, 0.5, 2.0] # strength of generative guidance
+
+    ddpm = DDPM(nn_model=ContextUnet(in_channels=3, n_feat=n_feat, n_classes=n_classes), betas=(1e-4, 0.02), n_T=n_T, device=device, drop_prob=0.5)
+    ddpm.to(device)
+
     image_label = None
     url_label = "link"
     text_label = "caption"
     text_encoder_name = "google/t5-v1_1-large"
-    size = 64
+    size = 28
     # dataset_name = "laion/laion2B-en"
     dataset_name = "laion/gpt4v-dataset"
-    dataset_info = {"batch_size": 1, "shuffle": True}
+    dataset_info = {"batch_size": batch_size, "shuffle": True}
     channels = "RGB"
     ds = load_dataset(dataset_name)
     
@@ -168,8 +184,12 @@ def test_dataloader():
         ),
         **dataset_info
     )
-    for i, data in enumerate(dl):
-        print(data)
+
+    for i, (img, text_emb) in enumerate(dl):
+        img = img.to(device)
+        text_emb = text_emb.to(device)
+        c = torch.randint(0,9,(batch_size,)).to(device)
+        loss = ddpm(img, c, text_emb)
         if i > 10:
             return
 

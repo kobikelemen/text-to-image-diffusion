@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+TEXT_EMB_DIM = 1024
+
 
 class ResidualConvBlock(nn.Module):
     def __init__(
@@ -69,7 +71,7 @@ class UnetUp(nn.Module):
             ResidualConvBlock(out_channels, out_channels),
             ResidualConvBlock(out_channels, out_channels),
         ]
-        self.cross_attn = nn.MultiheadAttention(embed_dim=out_channels, num_heads=8, batch_first=True) # TODO are these params correct?
+        self.cross_attn = nn.MultiheadAttention(embed_dim=out_channels, num_heads=1, batch_first=True, kdim=TEXT_EMB_DIM, vdim=TEXT_EMB_DIM) # TODO are these params correct?
         self.model = nn.Sequential(*layers)
 
     def forward(self, x, skip, text_embs):
