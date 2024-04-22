@@ -2,6 +2,7 @@
 from unet import ContextUnet
 from ddpm import DDPM
 from data import Collator, Dataset
+import t5
 
 from tqdm import tqdm
 import torch
@@ -14,7 +15,6 @@ from matplotlib.animation import FuncAnimation, PillowWriter
 
 from torch.utils.data import random_split, DataLoader
 from datasets import load_dataset, concatenate_datasets
-
 
 def train_mnist():
 
@@ -132,7 +132,7 @@ def test():
     x = torch.rand((batch_size,1,28,28)).to(device)
     loss = ddpm(x, c, text_embs)
 
-def test_dataloader():
+def train():
     # hardcoding these here
     n_epoch = 20
     batch_size = 4
@@ -143,11 +143,12 @@ def test_dataloader():
     # n_feat = 1024
     lrate = 1e-4
     save_model = False
-    save_dir = './results/diffusion_outputs10/'
+    save_dir = './results/diffusion_outputs_text-img/'
     ws_test = [0.0, 0.5, 2.0] # strength of generative guidance
 
     ddpm = DDPM(nn_model=ContextUnet(in_channels=3, n_feat=n_feat, n_classes=n_classes), betas=(1e-4, 0.02), n_T=n_T, device=device, drop_prob=0.5)
     ddpm.to(device)
+    optim = torch.optim.Adam(ddpm.parameters(), lr=lrate)
 
     image_label = None
     url_label = "link"
@@ -185,13 +186,33 @@ def test_dataloader():
         **dataset_info
     )
 
-    for i, (img, text_emb) in enumerate(dl):
-        img = img.to(device)
-        text_emb = text_emb.to(device)
-        c = torch.randint(0,9,(batch_size,)).to(device)
-        loss = ddpm(img, c, text_emb)
-        if i > 10:
-            return
+    eval_text = 'black cat'
+    eval_text_emb = t5.t5_encode_text([eval_text], name=text_encoder_name)
+
+    for i in range(n_epoch):
+        ddpm.train()
+        pbar = tqdm(dl)
+        loss_ema = None
+        for i, (img, text_emb) in enumerate(pbar):
+            optim.zero_grad()
+            img = img.to(device)
+            text_emb = text_emb.to(device)
+            c = torch.randint(0,9,(img.shape[0],)).to(device)
+            loss = ddpm(img, c, text_emb)
+            loss.backward()
+            if loss_ema is None:
+                loss_ema = loss.item()
+            else:
+                loss_ema = 0.9 * loss_ema + 0.1 * loss.item()
+            pbar.set_description(f"loss: {loss_ema:.4f}")
+            optim.step()
+        ddpm.eval()
+        with torch.no_grad():
+            imgh = ddpm.sample(8, (3, size, size), device, eval_text_emb)
+            xset = torch.cat([imgh, img[:8]], dim=0)
+            grid = make_grid(xset, normalize=True, value_range=(-1, 1), nrow=4)
+            save_image(grid, f"./contents/ddpm_sample_text-img{i}.png")
+            torch.save(ddpm.state_dict(), f"./ddpm_text-img.pth")
 
 
 def make_train_dataset(ds = None, *, batch_size, **dl_kwargs):
@@ -222,5 +243,5 @@ def make_train_dataset(ds = None, *, batch_size, **dl_kwargs):
 
 if __name__ == "__main__":
     # train_mnist()
-    test_dataloader()
+    train()
  

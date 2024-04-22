@@ -122,6 +122,8 @@ class ContextUnet(nn.Module):
         self.timeembed2 = EmbedFC(1, 1*n_feat)
         self.contextembed1 = EmbedFC(n_classes, 2*n_feat)
         self.contextembed2 = EmbedFC(n_classes, 1*n_feat)
+        self.textembed1 = EmbedFC(TEXT_EMB_DIM, 2*n_feat)
+        self.textembed2 = EmbedFC(TEXT_EMB_DIM, 1*n_feat)
 
         self.up0 = nn.Sequential(
             # nn.ConvTranspose2d(6 * n_feat, 2 * n_feat, 7, 7), # when concat temb and cemb end up w 6*n_feat
@@ -171,14 +173,16 @@ class ContextUnet(nn.Module):
         temb1 = self.timeembed1(t).view(-1, self.n_feat * 2, 1, 1)
         cemb2 = self.contextembed2(c).view(-1, self.n_feat, 1, 1)
         temb2 = self.timeembed2(t).view(-1, self.n_feat, 1, 1)
+        textembed1 = self.textembed1(pool_text_emb).view(-1, self.n_feat * 2, 1, 1)
+        textembed2 = self.textembed2(pool_text_emb).view(-1, self.n_feat, 1, 1)
 
         # could concatenate the context embedding here instead of adaGN
         # hiddenvec = torch.cat((hiddenvec, temb1, cemb1), 1)
 
         up1 = self.up0(hiddenvec)
-        up2 = self.up1(up1 + temb1, down2, text_embs)
-        # up2 = self.up1(up1 + temb1 + pool_text_emb, down2, text_embs)
-        up3 = self.up2(up2 + temb2, down1, text_embs)
-        # up3 = self.up2(up2 + temb2 + pool_text_emb, down1, text_embs)
+        # up2 = self.up1(up1 + temb1, down2, text_embs)
+        up2 = self.up1(up1 + temb1 + textembed1, down2, text_embs)
+        # up3 = self.up2(up2 + temb2, down1, text_embs)
+        up3 = self.up2(up2 + temb2 + textembed2, down1, text_embs)
         out = self.out(torch.cat((up3, x), 1))
         return out
