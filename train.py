@@ -13,8 +13,29 @@ from torchvision.utils import save_image, make_grid
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
 
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
+import os
+import torch.distributed as dist
+import torch.multiprocessing as mp
+
 from torch.utils.data import random_split, DataLoader
 from datasets import load_dataset, concatenate_datasets
+
+
+NUM_GPUS = 4
+
+
+
+def setup(rank, world_size):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+
+
+def cleanup():
+    dist.destroy_process_group()
+
 
 def train_mnist():
 
@@ -132,10 +153,24 @@ def test():
     x = torch.rand((batch_size,1,28,28)).to(device)
     loss = ddpm(x, c, text_embs)
 
-def train():
+
+    
+
+def prep_mnist_dl(rank, world_size, batch_size, pin_memory=False):
+    tf = transforms.Compose([transforms.ToTensor()]) # mnist is already normalised 0 to 1
+    dataset = MNIST("./data", train=True, download=True, transform=tf)
+    sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank, shuffle=False, drop_last=False)
+    dataloader = DataLoader(dataset, batch_size=batch_size, pin_memory=pin_memory, num_workers=5, drop_last=False, shuffle=False, generator=torch.Generator(device=f'cuda:{rank}'), sampler=sampler)
+    return dataloader
+
+
+def train(rank, world_size):
+    setup(rank, world_size)
+    torch.set_default_device(f'cuda:{rank}')
+    print(f'Hi from GPU {rank}')
     # hardcoding these here
     n_epoch = 20
-    batch_size = 4
+    batch_size = 32
     n_T = 400 # 500
     device = "cuda:0"
     n_classes = 10
@@ -146,7 +181,7 @@ def train():
     save_dir = './results/diffusion_outputs_text-img/'
     ws_test = [0.0, 0.5, 2.0] # strength of generative guidance
 
-    ddpm = DDPM(nn_model=ContextUnet(in_channels=3, n_feat=n_feat, n_classes=n_classes), betas=(1e-4, 0.02), n_T=n_T, device=device, drop_prob=0.5)
+    ddpm = DDPM(nn_model=ContextUnet(in_channels=1, n_feat=n_feat, n_classes=n_classes), betas=(1e-4, 0.02), n_T=n_T, device=device, drop_prob=0.5)
     ddpm.to(device)
     optim = torch.optim.Adam(ddpm.parameters(), lr=lrate)
 
@@ -186,17 +221,26 @@ def train():
         **dataset_info
     )
 
-    eval_text = 'black cat'
+    eval_text = '2'
     eval_text_emb = t5.t5_encode_text([eval_text], name=text_encoder_name)
+
+    dl_mnist = prep_mnist_dl(rank, world_size, batch_size)
+
 
     for i in range(n_epoch):
         ddpm.train()
-        pbar = tqdm(dl)
+        pbar = tqdm(dl_mnist)
         loss_ema = None
         for i, (img, text_emb) in enumerate(pbar):
             optim.zero_grad()
             img = img.to(device)
             text_emb = text_emb.to(device)
+            
+            emb = []
+            for j in range(len(text_emb)):
+                emb.append(str(text_emb[j]))
+            text_emb = t5.t5_encode_text(emb, name=text_encoder_name)
+            
             c = torch.randint(0,9,(img.shape[0],)).to(device)
             loss = ddpm(img, c, text_emb)
             loss.backward()
@@ -211,8 +255,9 @@ def train():
             imgh = ddpm.sample(8, (3, size, size), device, eval_text_emb)
             xset = torch.cat([imgh, img[:8]], dim=0)
             grid = make_grid(xset, normalize=True, value_range=(-1, 1), nrow=4)
-            save_image(grid, f"./contents/ddpm_sample_text-img{i}.png")
-            torch.save(ddpm.state_dict(), f"./ddpm_text-img.pth")
+            save_image(grid, f"./contents/ddpm_sample_text-img_mnist{i}.png")
+            torch.save(ddpm.state_dict(), f"./ddpm_text-img_mnist.pth")
+    cleanup()
 
 
 def make_train_dataset(ds = None, *, batch_size, **dl_kwargs):
@@ -243,5 +288,6 @@ def make_train_dataset(ds = None, *, batch_size, **dl_kwargs):
 
 if __name__ == "__main__":
     # train_mnist()
-    train()
+    # train()
+    mp.spawn(train, args=(NUM_GPUS,), nprocs=NUM_GPUS)
  
