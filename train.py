@@ -23,7 +23,7 @@ from torch.utils.data import random_split, DataLoader
 from datasets import load_dataset, concatenate_datasets
 
 
-NUM_GPUS = 4
+NUM_GPUS = 1
 
 
 
@@ -131,6 +131,7 @@ def train_mnist():
             torch.save(ddpm.state_dict(), save_dir + f"model_{ep}.pth")
             print('saved model at ' + save_dir + f"model_{ep}.pth")
 
+
 def test():
     # hardcoding these here
     n_epoch = 20
@@ -154,8 +155,6 @@ def test():
     loss = ddpm(x, c, text_embs)
 
 
-    
-
 def prep_mnist_dl(rank, world_size, batch_size, pin_memory=False):
     tf = transforms.Compose([transforms.ToTensor()]) # mnist is already normalised 0 to 1
     dataset = MNIST("./data", train=True, download=True, transform=tf)
@@ -172,7 +171,8 @@ def train(rank, world_size):
     n_epoch = 20
     batch_size = 32
     n_T = 400 # 500
-    device = "cuda:0"
+    # device = "cuda:0"
+    device = rank
     n_classes = 10
     n_feat = 128 # 128 ok, 256 better (but slower)
     # n_feat = 1024
@@ -183,6 +183,7 @@ def train(rank, world_size):
 
     ddpm = DDPM(nn_model=ContextUnet(in_channels=1, n_feat=n_feat, n_classes=n_classes), betas=(1e-4, 0.02), n_T=n_T, device=device, drop_prob=0.5)
     ddpm.to(device)
+    ddpm = DDP(ddpm, device_ids=[rank], output_device=rank, find_unused_parameters=True)
     optim = torch.optim.Adam(ddpm.parameters(), lr=lrate)
 
     image_label = None
@@ -221,8 +222,8 @@ def train(rank, world_size):
         **dataset_info
     )
 
-    eval_text = '2'
-    eval_text_emb = t5.t5_encode_text([eval_text], name=text_encoder_name)
+    eval_text = ['2', '3']
+    eval_text_emb = t5.t5_encode_text(eval_text, name=text_encoder_name)
 
     dl_mnist = prep_mnist_dl(rank, world_size, batch_size)
 
@@ -232,28 +233,31 @@ def train(rank, world_size):
         pbar = tqdm(dl_mnist)
         loss_ema = None
         for i, (img, text_emb) in enumerate(pbar):
-            optim.zero_grad()
-            img = img.to(device)
-            text_emb = text_emb.to(device)
+        #     optim.zero_grad()
+        #     img = img.to(device)
+        #     text_emb = text_emb.to(device)
             
-            emb = []
-            for j in range(len(text_emb)):
-                emb.append(str(text_emb[j]))
-            text_emb = t5.t5_encode_text(emb, name=text_encoder_name)
+        #     emb = []
+        #     for j in range(len(text_emb)):
+        #         emb.append(str(text_emb[j]))
+        #     text_emb = t5.t5_encode_text(emb, name=text_encoder_name)
             
             c = torch.randint(0,9,(img.shape[0],)).to(device)
-            loss = ddpm(img, c, text_emb)
-            loss.backward()
-            if loss_ema is None:
-                loss_ema = loss.item()
-            else:
-                loss_ema = 0.9 * loss_ema + 0.1 * loss.item()
-            pbar.set_description(f"loss: {loss_ema:.4f}")
-            optim.step()
+            if i > 1:
+                break
+        #     loss = ddpm(img, c, text_emb)
+        #     loss.backward()
+        #     if loss_ema is None:
+        #         loss_ema = loss.item()
+        #     else:
+        #         loss_ema = 0.9 * loss_ema + 0.1 * loss.item()
+        #     pbar.set_description(f"loss: {loss_ema:.4f}")
+        #     optim.step()
+        print(f'epoch: {i}, loss: {loss_ema}')
         ddpm.eval()
         with torch.no_grad():
-            imgh = ddpm.sample(8, (3, size, size), device, eval_text_emb)
-            xset = torch.cat([imgh, img[:8]], dim=0)
+            imgh = ddpm.module.sample(10, (1, size, size), device, eval_text_emb)
+            xset = torch.cat([imgh, img[:10]], dim=0)
             grid = make_grid(xset, normalize=True, value_range=(-1, 1), nrow=4)
             save_image(grid, f"./contents/ddpm_sample_text-img_mnist{i}.png")
             torch.save(ddpm.state_dict(), f"./ddpm_text-img_mnist.pth")

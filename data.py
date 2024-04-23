@@ -59,7 +59,6 @@ class Collator:
                 image = self.transform(image.convert(self.channels))
             except:
                 continue
-
             text = t5.t5_encode_text([item[self.text_label]], name=self.name)
             texts.append(torch.squeeze(text))
             images.append(image)

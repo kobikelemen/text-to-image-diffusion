@@ -55,16 +55,20 @@ class DDPM(nn.Module):
 
         x_i = torch.randn(n_sample, *size).to(device)  # x_T ~ N(0, 1), sample initial noise
         c_i = torch.arange(0,10).to(device) # context for us just cycles throught the mnist labels
+        print(f'c_i: {c_i.shape}')
         c_i = c_i.repeat(int(n_sample/c_i.shape[0]))
 
         # don't drop context at test time
         context_mask = torch.zeros_like(c_i).to(device)
         context_mask_text = torch.zeros((text_embs.shape[0], text_embs.shape[1], text_embs.shape[2])).to(self.device)
-
+        print(f'c_i: {c_i.shape}')
+        print(f'context_mask: {context_mask.shape}')
+        print(f'context_mask_text: {context_mask_text.shape}')
         # double the batch
         c_i = c_i.repeat(2)
         context_mask = context_mask.repeat(2)
         context_mask[n_sample:] = 1. # makes second half of batch context free
+        print(f'context_mask {context_mask}')
 
         context_mask_text = context_mask_text.repeat(2)
         context_mask_text[n_sample:] = 1. # makes second half of batch context free
