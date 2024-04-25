@@ -178,8 +178,8 @@ class ContextUnet(nn.Module):
 
         # could concatenate the context embedding here instead of adaGN
         # hiddenvec = torch.cat((hiddenvec, temb1, cemb1), 1)
-
         up1 = self.up0(hiddenvec)
+        # print(f'up1: {up1.shape} temb1: {temb1.shape} textembed1: {textembed1.shape}')
         # up2 = self.up1(up1 + temb1, down2, text_embs)
         up2 = self.up1(up1 + temb1 + textembed1, down2, text_embs)
         # up3 = self.up2(up2 + temb2, down1, text_embs)

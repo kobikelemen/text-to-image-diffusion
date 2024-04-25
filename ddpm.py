@@ -72,7 +72,7 @@ class DDPM(nn.Module):
         x_i_store = [] # keep track of generated steps in case want to plot something 
         print()
         for i in range(self.n_T, 0, -1):
-            print(f'sampling timestep {i}',end='\r')
+            # print(f'sampling timestep {i}',end='\r')
             t_is = torch.tensor([i / self.n_T]).to(device)
             t_is = t_is.repeat(n_sample,1,1,1)
 
@@ -81,7 +81,7 @@ class DDPM(nn.Module):
             t_is = t_is.repeat(2,1,1,1)
 
             z = torch.randn(n_sample, *size).to(device) if i > 1 else 0
-
+ 
             # split predictions and compute weighting
             eps = self.nn_model(x_i, c_i, t_is, context_mask, context_mask_text, text_embs)
             eps1 = eps[:n_sample]

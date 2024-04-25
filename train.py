@@ -4,6 +4,7 @@ from ddpm import DDPM
 from data import Collator, Dataset
 import t5
 
+import torch.nn.functional as F
 from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
@@ -16,6 +17,7 @@ from matplotlib.animation import FuncAnimation, PillowWriter
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 import os
+import random
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
@@ -222,45 +224,49 @@ def train(rank, world_size):
         **dataset_info
     )
 
-    eval_text = ['2', '3']
+    n_sample = 10
+    eval_text = [random.choice(['1','2','3','4','5','6','7','8','9']) for _ in range(n_sample)]
     eval_text_emb = t5.t5_encode_text(eval_text, name=text_encoder_name)
+    # one_hot_emb_mat = F.one_hot(torch.arange((0,10)))
 
     dl_mnist = prep_mnist_dl(rank, world_size, batch_size)
 
+    if device == 0:
+        print(f'sampling: {eval_text}')
 
     for i in range(n_epoch):
         ddpm.train()
         pbar = tqdm(dl_mnist)
         loss_ema = None
-        for i, (img, text_emb) in enumerate(pbar):
-        #     optim.zero_grad()
-        #     img = img.to(device)
-        #     text_emb = text_emb.to(device)
+        for img, text_emb in pbar:
+            optim.zero_grad()
+            img = img.to(device)
+            text_emb = text_emb.to(device)
             
-        #     emb = []
-        #     for j in range(len(text_emb)):
-        #         emb.append(str(text_emb[j]))
-        #     text_emb = t5.t5_encode_text(emb, name=text_encoder_name)
+            emb = []
+            for j in range(len(text_emb)):
+                emb.append(str(text_emb[j]))
+                # emb.append(one_hot_emb_mat[text_emb[j]])
+            text_emb = t5.t5_encode_text(emb, name=text_encoder_name)
             
             c = torch.randint(0,9,(img.shape[0],)).to(device)
-            if i > 1:
-                break
-        #     loss = ddpm(img, c, text_emb)
-        #     loss.backward()
-        #     if loss_ema is None:
-        #         loss_ema = loss.item()
-        #     else:
-        #         loss_ema = 0.9 * loss_ema + 0.1 * loss.item()
-        #     pbar.set_description(f"loss: {loss_ema:.4f}")
-        #     optim.step()
-        print(f'epoch: {i}, loss: {loss_ema}')
+            loss = ddpm(img, c, text_emb)
+            loss.backward()
+            if loss_ema is None:
+                loss_ema = loss.item()
+            else:
+                loss_ema = 0.9 * loss_ema + 0.1 * loss.item()
+            pbar.set_description(f"loss: {loss_ema:.4f}")
+            optim.step()
         ddpm.eval()
-        with torch.no_grad():
-            imgh = ddpm.module.sample(10, (1, size, size), device, eval_text_emb)
-            xset = torch.cat([imgh, img[:10]], dim=0)
-            grid = make_grid(xset, normalize=True, value_range=(-1, 1), nrow=4)
-            save_image(grid, f"./contents/ddpm_sample_text-img_mnist{i}.png")
-            torch.save(ddpm.state_dict(), f"./ddpm_text-img_mnist.pth")
+        if device == 0:
+            print(f'epoch: {i}, loss: {loss_ema}')
+            with torch.no_grad():
+                imgh, _ = ddpm.module.sample(n_sample, (1, size, size), device, eval_text_emb, 1)
+                xset = torch.cat([imgh, img[:n_sample]], dim=0)
+                grid = make_grid(xset, normalize=True, value_range=(-1, 1), nrow=4)
+                save_image(grid, f"./contents/ddpm_sample_text-img_mnist{i}.png")
+                torch.save(ddpm.state_dict(), f"./ddpm_text-img_mnist.pth")
     cleanup()
 
 
