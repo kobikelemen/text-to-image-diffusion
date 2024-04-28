@@ -165,13 +165,19 @@ def prep_mnist_dl(rank, world_size, batch_size, pin_memory=False):
     return dataloader
 
 
+def make_train_dataset(rank, world_size, pin_memory=False, ds = None, *, batch_size, **dl_kwargs):
+        sampler = DistributedSampler(ds, num_replicas=world_size, shuffle=False, rank=rank, drop_last=False)
+        dl = DataLoader(ds, num_workers=5, pin_memory=pin_memory, generator=torch.Generator(device=f'cuda:{rank}'), sampler=sampler, batch_size = batch_size, **dl_kwargs)
+        return dl
+
+
 def train(rank, world_size):
     setup(rank, world_size)
     torch.set_default_device(f'cuda:{rank}')
     print(f'Hi from GPU {rank}')
     # hardcoding these here
-    n_epoch = 10
-    batch_size = 32
+    n_epoch = 20
+    batch_size = 8
     n_T = 400 # 500
     # device = "cuda:0"
     device = rank
@@ -183,19 +189,19 @@ def train(rank, world_size):
     save_dir = './results/diffusion_outputs_text-img/'
     ws_test = [0.0, 0.5, 2.0] # strength of generative guidance
 
-    ddpm = DDPM(nn_model=ContextUnet(in_channels=1, n_feat=n_feat, n_classes=n_classes), betas=(1e-4, 0.02), n_T=n_T, device=device, drop_prob=0.1)
+    ddpm = DDPM(nn_model=ContextUnet(in_channels=3, n_feat=n_feat, n_classes=n_classes), betas=(1e-4, 0.02), n_T=n_T, device=device, drop_prob=0.1)
     ddpm.to(device)
     ddpm = DDP(ddpm, device_ids=[rank], output_device=rank, find_unused_parameters=True)
     optim = torch.optim.Adam(ddpm.parameters(), lr=lrate)
 
-    image_label = None
-    url_label = "link"
+    image_label = "images"
+    url_label = None
     text_label = "caption"
     text_encoder_name = "google/t5-v1_1-large"
-    size = 28
+    size = 28*2
     # dataset_name = "laion/laion2B-en"
-    dataset_name = "laion/gpt4v-dataset"
-    dataset_info = {"batch_size": batch_size, "shuffle": True}
+    dataset_name = "SaffalPoosh/deepFashion-with-masks"
+    dataset_info = {"batch_size": batch_size, "shuffle": False}
     channels = "RGB"
     ds = load_dataset(dataset_name)
     
@@ -212,6 +218,8 @@ def train(rank, world_size):
         train_ds = ds
 
     dl = make_train_dataset(
+        rank, 
+        world_size,
         ds = train_ds,
         collate_fn = Collator(
             image_size = size,
@@ -225,35 +233,44 @@ def train(rank, world_size):
     )
 
     n_sample = 10
-    # eval_text = [random.choice(['1','2','3','4','5','6','7','8','9']) for _ in range(n_sample)]
-    # eval_text_emb = t5.t5_encode_text(eval_text, name=text_encoder_name)
-    one_hot_emb_mat = F.one_hot(torch.arange(0,10))
-    eval_text = torch.randint(10,(n_sample,))
-    eval_text_emb = one_hot_emb_mat[eval_text]
-    eval_text_emb = eval_text_emb.reshape((eval_text_emb.shape[0], 1, eval_text_emb.shape[1]))
-
-    dl_mnist = prep_mnist_dl(rank, world_size, batch_size)
     eval_device = 0
-    if device == eval_device:
-        print(f'eval_text: {eval_text}')
+    eval_text = ['a woman in white shorts and a tank top', 
+                 'a woman in a green and white plaid dress', 
+                 'a woman in a blue shirt and jeans',
+                 'a woman in a black dress posing for a picture',
+                 'a woman in a plaid dress and hoodie',
+                 'a woman in a white top and green shorts',
+                 'a woman in a white shirt and black shorts',
+                 'a man in a blue shirt and black pants',
+                 'a woman wearing a black top and jeans',
+                 'a woman in an orange dress standing against a white wall'
+                 ]
+    eval_text_emb = t5.t5_encode_text(eval_text, name=text_encoder_name)
+    # one_hot_emb_mat = F.one_hot(torch.arange(0,10))
+    # eval_text = torch.randint(10,(n_sample,))
+    # eval_text_emb = one_hot_emb_mat[eval_text]
+    # eval_text_emb = eval_text_emb.reshape((eval_text_emb.shape[0], 1, eval_text_emb.shape[1]))
+    # dl_mnist = prep_mnist_dl(rank, world_size, batch_size)
+    # if device == eval_device:
+    #     print(f'eval_text: {eval_text}')
 
 
     for i in range(n_epoch):
         ddpm.train()
-        pbar = tqdm(dl_mnist)
+        pbar = tqdm(dl)
         loss_ema = None
         for img, text_emb in pbar:
             optim.zero_grad()
             img = img.to(device)
             text_emb = text_emb.to(device)
             
-            emb = []
+            # emb = []
             # for j in range(len(text_emb)):
             #     emb.append(str(text_emb[j]))
             #     # emb.append(one_hot_emb_mat[text_emb[j]])
             # text_emb = t5.t5_encode_text(emb, name=text_encoder_name)
-            text_emb = one_hot_emb_mat[text_emb]
-            text_emb = text_emb.reshape((text_emb.shape[0], 1, text_emb.shape[1]))
+            # text_emb = one_hot_emb_mat[text_emb]
+            # text_emb = text_emb.reshape((text_emb.shape[0], 1, text_emb.shape[1]))
 
             
             c = torch.randint(0,9,(img.shape[0],)).to(device)
@@ -269,36 +286,12 @@ def train(rank, world_size):
         if device == eval_device:
             print(f'epoch: {i}, loss: {loss_ema}')
             with torch.no_grad():
-                imgh, _ = ddpm.module.sample(n_sample, (1, size, size), device, eval_text_emb, 1)
+                imgh, _ = ddpm.module.sample(n_sample, (3, size, size), device, eval_text_emb, 1)
                 xset = torch.cat([imgh, img[:n_sample]], dim=0)
                 grid = make_grid(xset, normalize=True, value_range=(-1, 1), nrow=4)
                 save_image(grid, f"./contents/ddpm_sample_text-img_mnist{i}.png")
                 torch.save(ddpm.state_dict(), f"./ddpm_text-img_mnist.pth")
     cleanup()
-
-
-def make_train_dataset(ds = None, *, batch_size, **dl_kwargs):
-        # if not exists(ds):
-        #     return
-
-        # assert not exists(self.train_dl), 'training dataloader was already added'
-
-        # valid_ds = None
-        # if self.split_valid_from_train:
-        #     train_size = int((1 - self.split_valid_fraction) * len(ds))
-        #     valid_size = len(ds) - train_size
-
-        #     ds, valid_ds = random_split(ds, [train_size, valid_size], generator = torch.Generator().manual_seed(self.split_random_seed))
-        #     self.print(f'training with dataset of {len(ds)} samples and validating with randomly splitted {len(valid_ds)} samples')
-
-        dl = DataLoader(ds, batch_size = batch_size, **dl_kwargs)
-        # self.add_train_dataloader(dl)
-
-        # if not self.split_valid_from_train:
-        #     return
-
-        # self.add_valid_dataset(valid_ds, batch_size = batch_size, **dl_kwargs)
-        return dl
 
 
 

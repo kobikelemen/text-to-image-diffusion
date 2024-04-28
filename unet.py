@@ -3,8 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# TEXT_EMB_DIM = 1024
-TEXT_EMB_DIM = 10
+TEXT_EMB_DIM = 1024
+# TEXT_EMB_DIM = 10
 
 
 class ResidualConvBlock(nn.Module):
@@ -153,8 +153,6 @@ class ContextUnet(nn.Module):
         # x is (noisy) image, c is context label, t is timestep, 
         # context_mask says which samples to block the context on
         
-        batch_size = x.shape[0]
-
         pool_text_emb = self.avg_pool(text_embs)
 
         x = self.init_conv(x)
