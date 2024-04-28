@@ -25,7 +25,7 @@ from torch.utils.data import random_split, DataLoader
 from datasets import load_dataset, concatenate_datasets
 
 
-NUM_GPUS = 1
+NUM_GPUS = 4
 
 
 
@@ -170,7 +170,7 @@ def train(rank, world_size):
     torch.set_default_device(f'cuda:{rank}')
     print(f'Hi from GPU {rank}')
     # hardcoding these here
-    n_epoch = 20
+    n_epoch = 10
     batch_size = 32
     n_T = 400 # 500
     # device = "cuda:0"
@@ -183,7 +183,7 @@ def train(rank, world_size):
     save_dir = './results/diffusion_outputs_text-img/'
     ws_test = [0.0, 0.5, 2.0] # strength of generative guidance
 
-    ddpm = DDPM(nn_model=ContextUnet(in_channels=1, n_feat=n_feat, n_classes=n_classes), betas=(1e-4, 0.02), n_T=n_T, device=device, drop_prob=0.5)
+    ddpm = DDPM(nn_model=ContextUnet(in_channels=1, n_feat=n_feat, n_classes=n_classes), betas=(1e-4, 0.02), n_T=n_T, device=device, drop_prob=0.1)
     ddpm.to(device)
     ddpm = DDP(ddpm, device_ids=[rank], output_device=rank, find_unused_parameters=True)
     optim = torch.optim.Adam(ddpm.parameters(), lr=lrate)
@@ -225,14 +225,18 @@ def train(rank, world_size):
     )
 
     n_sample = 10
-    eval_text = [random.choice(['1','2','3','4','5','6','7','8','9']) for _ in range(n_sample)]
-    eval_text_emb = t5.t5_encode_text(eval_text, name=text_encoder_name)
-    # one_hot_emb_mat = F.one_hot(torch.arange((0,10)))
+    # eval_text = [random.choice(['1','2','3','4','5','6','7','8','9']) for _ in range(n_sample)]
+    # eval_text_emb = t5.t5_encode_text(eval_text, name=text_encoder_name)
+    one_hot_emb_mat = F.one_hot(torch.arange(0,10))
+    eval_text = torch.randint(10,(n_sample,))
+    eval_text_emb = one_hot_emb_mat[eval_text]
+    eval_text_emb = eval_text_emb.reshape((eval_text_emb.shape[0], 1, eval_text_emb.shape[1]))
 
     dl_mnist = prep_mnist_dl(rank, world_size, batch_size)
+    eval_device = 0
+    if device == eval_device:
+        print(f'eval_text: {eval_text}')
 
-    if device == 0:
-        print(f'sampling: {eval_text}')
 
     for i in range(n_epoch):
         ddpm.train()
@@ -244,10 +248,13 @@ def train(rank, world_size):
             text_emb = text_emb.to(device)
             
             emb = []
-            for j in range(len(text_emb)):
-                emb.append(str(text_emb[j]))
-                # emb.append(one_hot_emb_mat[text_emb[j]])
-            text_emb = t5.t5_encode_text(emb, name=text_encoder_name)
+            # for j in range(len(text_emb)):
+            #     emb.append(str(text_emb[j]))
+            #     # emb.append(one_hot_emb_mat[text_emb[j]])
+            # text_emb = t5.t5_encode_text(emb, name=text_encoder_name)
+            text_emb = one_hot_emb_mat[text_emb]
+            text_emb = text_emb.reshape((text_emb.shape[0], 1, text_emb.shape[1]))
+
             
             c = torch.randint(0,9,(img.shape[0],)).to(device)
             loss = ddpm(img, c, text_emb)
@@ -259,7 +266,7 @@ def train(rank, world_size):
             pbar.set_description(f"loss: {loss_ema:.4f}")
             optim.step()
         ddpm.eval()
-        if device == 0:
+        if device == eval_device:
             print(f'epoch: {i}, loss: {loss_ema}')
             with torch.no_grad():
                 imgh, _ = ddpm.module.sample(n_sample, (1, size, size), device, eval_text_emb, 1)

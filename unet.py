@@ -3,7 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-TEXT_EMB_DIM = 1024
+# TEXT_EMB_DIM = 1024
+TEXT_EMB_DIM = 10
 
 
 class ResidualConvBlock(nn.Module):
@@ -71,7 +72,7 @@ class UnetUp(nn.Module):
             ResidualConvBlock(out_channels, out_channels),
             ResidualConvBlock(out_channels, out_channels),
         ]
-        self.cross_attn = nn.MultiheadAttention(embed_dim=out_channels, num_heads=1, batch_first=True, kdim=TEXT_EMB_DIM, vdim=TEXT_EMB_DIM) # TODO are these params correct?
+        self.cross_attn = nn.MultiheadAttention(embed_dim=out_channels, num_heads=1, batch_first=True, kdim=out_channels, vdim=out_channels) # TODO are these params correct?
         self.model = nn.Sequential(*layers)
 
     def forward(self, x, skip, text_embs):
@@ -79,9 +80,11 @@ class UnetUp(nn.Module):
         x = self.model(x)
         x_shape = x.shape
         x_reshape = x.view(x.shape[0], x.shape[1], x.shape[2]*x.shape[3])
-        x_reshape = x_reshape.permute(0,2,1)
-        x = self.cross_attn(query=x_reshape, key=text_embs, value=text_embs)
-        return x[0].permute(0,2,1).view(x_shape)
+        x_reshape = x_reshape.permute(0,2,1) 
+        k = torch.cat((x_reshape,text_embs), dim=1)
+        v = torch.cat((x_reshape,text_embs), dim=1)
+        x, _ = self.cross_attn(query=x_reshape, key=k, value=v)
+        return x.permute(0,2,1).view(x_shape)
 
 
 class EmbedFC(nn.Module):
@@ -124,6 +127,8 @@ class ContextUnet(nn.Module):
         self.contextembed2 = EmbedFC(n_classes, 1*n_feat)
         self.textembed1 = EmbedFC(TEXT_EMB_DIM, 2*n_feat)
         self.textembed2 = EmbedFC(TEXT_EMB_DIM, 1*n_feat)
+        self.textatt1 = EmbedFC(TEXT_EMB_DIM, 1*n_feat)
+        self.textatt2 = EmbedFC(TEXT_EMB_DIM, 1*n_feat)
 
         self.up0 = nn.Sequential(
             # nn.ConvTranspose2d(6 * n_feat, 2 * n_feat, 7, 7), # when concat temb and cemb end up w 6*n_feat
@@ -142,12 +147,14 @@ class ContextUnet(nn.Module):
         )
     
     def avg_pool(self, text_embs):
-        return torch.mean(text_embs, dim=1)
+        return torch.mean(text_embs.float(), dim=1)
 
     def forward(self, x, c, t, context_mask, context_mask_text, text_embs):
         # x is (noisy) image, c is context label, t is timestep, 
         # context_mask says which samples to block the context on
         
+        batch_size = x.shape[0]
+
         pool_text_emb = self.avg_pool(text_embs)
 
         x = self.init_conv(x)
@@ -175,14 +182,15 @@ class ContextUnet(nn.Module):
         temb2 = self.timeembed2(t).view(-1, self.n_feat, 1, 1)
         textembed1 = self.textembed1(pool_text_emb).view(-1, self.n_feat * 2, 1, 1)
         textembed2 = self.textembed2(pool_text_emb).view(-1, self.n_feat, 1, 1)
+        
+        text_embs_reshape = text_embs.view(-1,TEXT_EMB_DIM)
+        textatt1 = self.textatt1(text_embs_reshape).view(text_embs.shape[0],text_embs.shape[1],-1)
+        textatt2 = self.textatt2(text_embs_reshape).view(text_embs.shape[0],text_embs.shape[1],-1)
 
         # could concatenate the context embedding here instead of adaGN
         # hiddenvec = torch.cat((hiddenvec, temb1, cemb1), 1)
         up1 = self.up0(hiddenvec)
-        # print(f'up1: {up1.shape} temb1: {temb1.shape} textembed1: {textembed1.shape}')
-        # up2 = self.up1(up1 + temb1, down2, text_embs)
-        up2 = self.up1(up1 + temb1 + textembed1, down2, text_embs)
-        # up3 = self.up2(up2 + temb2, down1, text_embs)
-        up3 = self.up2(up2 + temb2 + textembed2, down1, text_embs)
+        up2 = self.up1(up1 + temb1 + textembed1, down2, textatt1)
+        up3 = self.up2(up2 + temb2 + textembed2, down1, textatt2)
         out = self.out(torch.cat((up3, x), 1))
         return out
