@@ -3,6 +3,8 @@ from unet import ContextUnet
 from ddpm import DDPM
 from data import Collator, Dataset
 import t5
+from db import DB
+
 
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -25,7 +27,7 @@ from torch.utils.data import random_split, DataLoader
 from datasets import load_dataset, concatenate_datasets
 
 
-NUM_GPUS = 4
+NUM_GPUS = 1
 
 
 
@@ -176,13 +178,13 @@ def train(rank, world_size):
     torch.set_default_device(f'cuda:{rank}')
     print(f'Hi from GPU {rank}')
     # hardcoding these here
-    n_epoch = 20
-    batch_size = 8
+    n_epoch = 100
+    batch_size = 4
     n_T = 400 # 500
     # device = "cuda:0"
     device = rank
     n_classes = 10
-    n_feat = 128 # 128 ok, 256 better (but slower)
+    n_feat = 256 # 128 ok, 256 better (but slower)
     # n_feat = 1024
     lrate = 1e-4
     save_model = False
@@ -246,31 +248,23 @@ def train(rank, world_size):
                  'a woman in an orange dress standing against a white wall'
                  ]
     eval_text_emb = t5.t5_encode_text(eval_text, name=text_encoder_name)
-    # one_hot_emb_mat = F.one_hot(torch.arange(0,10))
-    # eval_text = torch.randint(10,(n_sample,))
-    # eval_text_emb = one_hot_emb_mat[eval_text]
-    # eval_text_emb = eval_text_emb.reshape((eval_text_emb.shape[0], 1, eval_text_emb.shape[1]))
-    # dl_mnist = prep_mnist_dl(rank, world_size, batch_size)
-    # if device == eval_device:
-    #     print(f'eval_text: {eval_text}')
 
+    # emb_db = DB()
 
     for i in range(n_epoch):
         ddpm.train()
         pbar = tqdm(dl)
         loss_ema = None
-        for img, text_emb in pbar:
+        for _, (img, text_emb) in enumerate(pbar):
             optim.zero_grad()
             img = img.to(device)
             text_emb = text_emb.to(device)
             
-            # emb = []
-            # for j in range(len(text_emb)):
-            #     emb.append(str(text_emb[j]))
-            #     # emb.append(one_hot_emb_mat[text_emb[j]])
-            # text_emb = t5.t5_encode_text(emb, name=text_encoder_name)
-            # text_emb = one_hot_emb_mat[text_emb]
-            # text_emb = text_emb.reshape((text_emb.shape[0], 1, text_emb.shape[1]))
+            # DB accessing code
+            # text_emb = torch.zeros((batch_size,t5.MAX_LENGTH,1024)).to(device)
+            # for j in range(len(img)):
+            #     emb = emb_db.get(idx*batch_size+j)
+            #     text_emb[j] = emb
 
             
             c = torch.randint(0,9,(img.shape[0],)).to(device)
@@ -289,7 +283,7 @@ def train(rank, world_size):
                 imgh, _ = ddpm.module.sample(n_sample, (3, size, size), device, eval_text_emb, 1)
                 xset = torch.cat([imgh, img[:n_sample]], dim=0)
                 grid = make_grid(xset, normalize=True, value_range=(-1, 1), nrow=4)
-                save_image(grid, f"./contents/ddpm_sample_text-img_mnist{i}.png")
+                save_image(grid, f"./contents/ddpm_sample_text-img{i}.png")
                 torch.save(ddpm.state_dict(), f"./ddpm_text-img_mnist.pth")
     cleanup()
 

@@ -4,6 +4,8 @@ from typing import List
 from transformers import T5Tokenizer, T5EncoderModel, T5Config
 from einops import rearrange
 
+from db import DB
+
 transformers.logging.set_verbosity_error()
 
 def exists(val):
@@ -104,6 +106,12 @@ def t5_encode_tokenized_text(
     encoded_text = encoded_text.masked_fill(~rearrange(attn_mask, '... -> ... 1'), 0.) # just force all embeddings that is padding to be equal to 0.
     return encoded_text
 
+# def t5_encode_text_from_db(texts, idxs):
+#     res = []
+#     emb_db = DB()
+#     for text in texts:
+#         res.append(emb_db.get())
+
 def t5_encode_text(
     texts: List[str],
     name = DEFAULT_T5_NAME,
@@ -115,5 +123,8 @@ def t5_encode_text(
     if return_attn_mask:
         attn_mask = attn_mask.bool()
         return encoded_text, attn_mask
+
+    # emb_db = DB()
+    # emb_db.put(encoded_text)
 
     return encoded_text

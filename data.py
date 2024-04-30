@@ -60,6 +60,7 @@ class Collator:
             except:
                 continue
             text = t5.t5_encode_text([item[self.text_label]], name=self.name)
+            # texts.append(torch.tensor([])) # new
             texts.append(torch.squeeze(text))
             images.append(image)
 
@@ -83,7 +84,6 @@ class Collator:
             )
             with urllib.request.urlopen(request, timeout=timeout) as req:
                 image = Image.open(io.BytesIO(req.read())).convert('RGB')
-                # image.save('/home/kk2720/dl/text-to-image-diffusion/imgs/img.jpg', 'JPEG')
 
 
         except Exception:
