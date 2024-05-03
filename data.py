@@ -13,6 +13,7 @@ from PIL import Image
 from datasets.utils.file_utils import get_datasets_user_agent
 import io
 import urllib
+import time
 
 USER_AGENT = get_datasets_user_agent()
 
@@ -51,6 +52,7 @@ class Collator:
         texts = []
         images = []
         for item in batch:
+
             try:
                 if self.download:
                     image = self.fetch_single_image(item[self.url_label])

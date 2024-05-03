@@ -20,6 +20,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 import os
 import random
+import time
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
@@ -27,8 +28,9 @@ from torch.utils.data import random_split, DataLoader
 from datasets import load_dataset, concatenate_datasets
 
 
-NUM_GPUS = 1
+NUM_GPUS = 4
 
+emb_db = DB()
 
 
 def setup(rank, world_size):
@@ -179,7 +181,7 @@ def train(rank, world_size):
     print(f'Hi from GPU {rank}')
     # hardcoding these here
     n_epoch = 100
-    batch_size = 4
+    batch_size = 2
     n_T = 400 # 500
     # device = "cuda:0"
     device = rank
@@ -249,17 +251,22 @@ def train(rank, world_size):
                  ]
     eval_text_emb = t5.t5_encode_text(eval_text, name=text_encoder_name)
 
-    # emb_db = DB()
 
     for i in range(n_epoch):
         ddpm.train()
         pbar = tqdm(dl)
         loss_ema = None
-        for _, (img, text_emb) in enumerate(pbar):
+        # batch_start = time.time()
+        for idx, (img, text_emb) in enumerate(pbar):
             optim.zero_grad()
             img = img.to(device)
             text_emb = text_emb.to(device)
             
+            # DB saving embeddings code
+            # for j in range(len(img)):
+            #     emb_db.put(idx*batch_size+j, text_emb[j])
+            # continue
+
             # DB accessing code
             # text_emb = torch.zeros((batch_size,t5.MAX_LENGTH,1024)).to(device)
             # for j in range(len(img)):
@@ -276,6 +283,10 @@ def train(rank, world_size):
                 loss_ema = 0.9 * loss_ema + 0.1 * loss.item()
             pbar.set_description(f"loss: {loss_ema:.4f}")
             optim.step()
+            # batch_end = time.time()
+            # print(f'batch time: {batch_end-batch_start}')
+            # batch_start = batch_end
+        # break
         ddpm.eval()
         if device == eval_device:
             print(f'epoch: {i}, loss: {loss_ema}')
@@ -283,8 +294,8 @@ def train(rank, world_size):
                 imgh, _ = ddpm.module.sample(n_sample, (3, size, size), device, eval_text_emb, 1)
                 xset = torch.cat([imgh, img[:n_sample]], dim=0)
                 grid = make_grid(xset, normalize=True, value_range=(-1, 1), nrow=4)
-                save_image(grid, f"./contents/ddpm_sample_text-img{i}.png")
-                torch.save(ddpm.state_dict(), f"./ddpm_text-img_mnist.pth")
+                save_image(grid, f"./contents/ddpm_sample_text-img2-{i}.png")
+                torch.save(ddpm.state_dict(), f"./ddpm_text-img.pth")
     cleanup()
 
 
@@ -294,4 +305,5 @@ if __name__ == "__main__":
     # train_mnist()
     # train()
     mp.spawn(train, args=(NUM_GPUS,), nprocs=NUM_GPUS)
+    emb_db.stop()
  
