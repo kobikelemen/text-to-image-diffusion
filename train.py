@@ -30,7 +30,7 @@ from datasets import load_dataset, concatenate_datasets
 
 NUM_GPUS = 4
 
-emb_db = DB()
+# emb_db = DB()
 
 
 def setup(rank, world_size):
@@ -181,7 +181,7 @@ def train(rank, world_size):
     print(f'Hi from GPU {rank}')
     # hardcoding these here
     n_epoch = 100
-    batch_size = 2
+    batch_size = 4
     n_T = 400 # 500
     # device = "cuda:0"
     device = rank
@@ -305,5 +305,5 @@ if __name__ == "__main__":
     # train_mnist()
     # train()
     mp.spawn(train, args=(NUM_GPUS,), nprocs=NUM_GPUS)
-    emb_db.stop()
+    # emb_db.stop()
  
